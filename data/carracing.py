@@ -3,6 +3,7 @@ Generating data from the CarRacing gym environment.
 !!! DOES NOT WORK ON TITANIC, DO IT AT HOME, THEN SCP !!!
 """
 import argparse
+import gc
 from os.path import join, exists
 import gym
 import numpy as np
@@ -12,10 +13,10 @@ def generate_data(rollouts, data_dir, noise_type): # pylint: disable=R0914
     """ Generates data """
     assert exists(data_dir), "The data directory does not exist..."
 
-    env = gym.make("CarRacing-v0")
     seq_len = 1000
 
     for i in range(rollouts):
+        env = gym.make("CarRacing-v0")
         env.reset()
         env.env.viewer.window.dispatch_events()
         if noise_type == 'white':
@@ -45,6 +46,9 @@ def generate_data(rollouts, data_dir, noise_type): # pylint: disable=R0914
                          actions=np.array(a_rollout),
                          terminals=np.array(d_rollout))
                 break
+        env.close()
+        del env
+        gc.collect()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

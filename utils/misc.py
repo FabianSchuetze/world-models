@@ -1,4 +1,5 @@
 """ Various auxiliary utilities """
+import gc
 import math
 from os.path import join, exists
 import torch
@@ -14,6 +15,7 @@ gym.envs.box2d.car_racing.STATE_W, gym.envs.box2d.car_racing.STATE_H = 64, 64
 # Hardcoded for now
 ASIZE, LSIZE, RSIZE, RED_SIZE, SIZE =\
     3, 32, 256, 64, 64
+RSIZE = 0
 
 # Same
 transform = transforms.Compose([
@@ -106,33 +108,35 @@ class RolloutGenerator(object):
     def __init__(self, mdir, device, time_limit):
         """ Build vae, rnn, controller and environment. """
         # Loading world model and vae
-        vae_file, rnn_file, ctrl_file = \
-            [join(mdir, m, 'best.tar') for m in ['vae', 'mdrnn', 'ctrl']]
+        device = torch.device('cpu')
+        vae_file, ctrl_file = \
+            [join(mdir, m, 'best.tar') for m in ['vae', 'ctrl']]
 
-        assert exists(vae_file) and exists(rnn_file),\
-            "Either vae or mdrnn is untrained."
+        # breakpoint()
+        assert exists(vae_file), "Either vae or mdrnn is untrained."
 
-        vae_state, rnn_state = [
-            torch.load(fname, map_location={'cuda:0': str(device)})
-            for fname in (vae_file, rnn_file)]
+        vae_state  = [
+                torch.load(fname, map_location='cpu')
+            for fname in (vae_file,)]
+        vae_state = vae_state[0]
 
-        for m, s in (('VAE', vae_state), ('MDRNN', rnn_state)):
-            print("Loading {} at epoch {} "
-                  "with test loss {}".format(
-                      m, s['epoch'], s['precision']))
+        # for m, s in (('VAE', vae_state),):
+            # print("Loading {} at epoch {} "
+                  # "with test loss {}".format(
+                      # m, s['epoch'], s['precision']))
 
-        self.vae = VAE(3, LSIZE).to(device)
+        self.vae = VAE(3, LSIZE)
         self.vae.load_state_dict(vae_state['state_dict'])
 
-        self.mdrnn = MDRNNCell(LSIZE, ASIZE, RSIZE, 5).to(device)
-        self.mdrnn.load_state_dict(
-            {k.strip('_l0'): v for k, v in rnn_state['state_dict'].items()})
+        # self.mdrnn = MDRNNCell(LSIZE, ASIZE, RSIZE, 5).to(device)
+        # self.mdrnn.load_state_dict(
+            # {k.strip('_l0'): v for k, v in rnn_state['state_dict'].items()})
 
         self.controller = Controller(LSIZE, RSIZE, ASIZE).to(device)
 
         # load controller if it was previously saved
         if exists(ctrl_file):
-            ctrl_state = torch.load(ctrl_file, map_location={'cuda:0': str(device)})
+            ctrl_state = torch.load(ctrl_file, map_location='cpu')
             print("Loading Controller with reward {}".format(
                 ctrl_state['reward']))
             self.controller.load_state_dict(ctrl_state['state_dict'])
@@ -157,9 +161,9 @@ class RolloutGenerator(object):
             - next_hidden (1 x 256) torch tensor
         """
         _, latent_mu, _ = self.vae(obs)
-        action = self.controller(latent_mu, hidden[0])
-        _, _, _, _, _, next_hidden = self.mdrnn(action, latent_mu, hidden)
-        return action.squeeze().cpu().numpy(), next_hidden
+        action = self.controller(latent_mu)
+        # _, _, _, _, _, next_hidden = self.mdrnn(action, latent_mu, hidden)
+        return action.squeeze().cpu().numpy(), hidden
 
     def rollout(self, params, render=False):
         """ Execute a rollout and returns minus cumulative reward.
@@ -198,3 +202,5 @@ class RolloutGenerator(object):
             if done or i > self.time_limit:
                 return - cumulative
             i += 1
+        self.env.close()
+        gc.collect()

@@ -13,12 +13,13 @@ from time import sleep
 from torch.multiprocessing import Process, Queue
 import torch
 import cma
-from models import Controller
 from tqdm import tqdm
 import numpy as np
+from models import Controller
 from utils.misc import RolloutGenerator, ASIZE, RSIZE, LSIZE
 from utils.misc import load_parameters
 from utils.misc import flatten_parameters
+RSIZE = 0
 
 # parsing
 parser = argparse.ArgumentParser()
@@ -82,8 +83,8 @@ def slave_routine(p_queue, r_queue, e_queue, p_index):
     :args p_index: the process index
     """
     # init routine
-    gpu = p_index % torch.cuda.device_count()
-    device = torch.device('cuda:{}'.format(gpu) if torch.cuda.is_available() else 'cpu')
+    # gpu = p_index % torch.cuda.device_count()
+    device = torch.device('cpu')
 
     # redirect streams
     sys.stdout = open(join(tmp_dir, str(getpid()) + '.out'), 'a')
@@ -114,7 +115,7 @@ for p_index in range(num_workers):
 ################################################################################
 #                           Evaluation                                         #
 ################################################################################
-def evaluate(solutions, results, rollouts=100):
+def evaluate(solutions, results, rollouts=10):
     """ Give current controller evaluation.
 
     Evaluation is minus the cumulated reward averaged over rollout runs.
@@ -150,7 +151,7 @@ cur_best = None
 ctrl_file = join(ctrl_dir, 'best.tar')
 print("Attempting to load previous best...")
 if exists(ctrl_file):
-    state = torch.load(ctrl_file, map_location={'cuda:0': 'cpu'})
+    state = torch.load(ctrl_file, map_location='cpu')
     cur_best = - state['reward']
     controller.load_state_dict(state['state_dict'])
     print("Previous best was {}...".format(-cur_best))
@@ -158,6 +159,7 @@ if exists(ctrl_file):
 parameters = controller.parameters()
 es = cma.CMAEvolutionStrategy(flatten_parameters(parameters), 0.1,
                               {'popsize': pop_size})
+# breakpoint()
 
 epoch = 0
 log_step = 3
@@ -165,6 +167,8 @@ while not es.stop():
     if cur_best is not None and - cur_best > args.target_return:
         print("Already better than target, breaking...")
         break
+    if cur_best is not None:
+        print(-1*cur_best)
 
     r_list = [0] * pop_size  # result list
     solutions = es.ask()
